@@ -120,7 +120,7 @@ function processGradeData($data, $conn) {
     $errors = [];
     
     $student = new StudentModel($conn);
-    $subject = new SubjectModel($conn);
+    $subject = new Subject($conn);
     $teacher = new TeacherModel($conn);
     $grade = new GradeModel($conn);
     
