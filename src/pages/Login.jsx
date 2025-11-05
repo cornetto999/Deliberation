@@ -33,15 +33,43 @@ const Login = () => {
     setError("");
 
     try {
-      const response = await fetch(apiUrl('login.php'), {
+      // Try simple_login.php first (more reliable), fallback to login.php
+      let response = await fetch(apiUrl('simple_login.php'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(formData),
       });
+      
+      // If simple_login fails, try regular login
+      if (!response.ok && response.status === 404) {
+        response = await fetch(apiUrl('login.php'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(formData),
+        });
+      }
 
-      const data = await response.json();
+      let data;
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        try {
+          data = await response.json();
+        } catch (parseErr) {
+          setError(`Failed to parse server response: ${parseErr.message}`);
+          setIsLoading(false);
+          return;
+        }
+      } else {
+        // Response is not JSON, might be HTML error page
+        const text = await response.text();
+        setError(`Server error (${response.status}): ${text.substring(0, 100)}`);
+        setIsLoading(false);
+        return;
+      }
 
       if (response.ok) {
         // Store user data in localStorage
@@ -54,10 +82,17 @@ const Login = () => {
         // Redirect to dashboard
         navigate('/');
       } else {
-        setError(data.error || 'Login failed');
+        // Show detailed error message from server
+        const errorMsg = data.error || `Login failed (${response.status})`;
+        setError(errorMsg);
+        
+        // If it's a database connection error, provide helpful hint
+        if (errorMsg.includes('Database connection failed')) {
+          setError(errorMsg + '. Please check if MySQL is running and the database exists.');
+        }
       }
     } catch (err) {
-      setError('Network error. Please check if the server is running.');
+      setError(`Network error: ${err.message}. Please check if the server is running and accessible.`);
     } finally {
       setIsLoading(false);
     }

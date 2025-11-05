@@ -137,6 +137,48 @@ const Teachers = () => {
     return 'RED (40.01%-100%)';
   };
 
+  // Zone helpers aligned with report logic
+  const zoneFromPercent = (pct) => {
+    if (!isFinite(pct)) return null;
+    if (pct <= 10) return 'green';
+    if (pct <= 40) return 'yellow';
+    return 'red';
+  };
+
+  const zoneFromCategoryLabel = (label) => {
+    if (!label || typeof label !== 'string') return null;
+    const l = label.toUpperCase();
+    if (l.includes('GREEN')) return 'green';
+    if (l.includes('YELLOW')) return 'yellow';
+    if (l.includes('RED')) return 'red';
+    return null;
+  };
+
+  const zoneForTeacherPeriod = (t, period) => {
+    if (!t) return null;
+    const enrolled = Number(t.enrolled_students) || 0;
+    const computeFrom = (pk) => {
+      const pct = percentFromData(t[`${pk}_percent`], t[`${pk}_failed`], enrolled);
+      if (pct !== null) return zoneFromPercent(pct);
+      const cat = t[`${pk}_category`];
+      const zoneFromCat = zoneFromCategoryLabel(cat);
+      if (zoneFromCat) return zoneFromCat;
+      return null;
+    };
+
+    if (period === 'All') {
+      const zones = [computeFrom('p1'), computeFrom('p2'), computeFrom('p3')].filter(Boolean);
+      if (zones.includes('red')) return 'red';
+      if (zones.includes('yellow')) return 'yellow';
+      if (zones.includes('green')) return 'green';
+      return t.zone || null;
+    }
+
+    const base = period.toLowerCase();
+    const z = computeFrom(base);
+    return z || t.zone || null;
+  };
+
   const fetchTeachers = async () => {
     try {
       setLoading(true);
@@ -178,7 +220,8 @@ const Teachers = () => {
            teacher.department.toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesDepartment = !filters.department || teacher.department === filters.department;
-    const matchesZone = !filters.zone || teacher.zone === filters.zone;
+    const teacherZone = zoneForTeacherPeriod(teacher, selectedPeriod);
+    const matchesZone = !filters.zone || teacherZone === filters.zone;
     const matchesStatus = !filters.status || teacher.status === filters.status;
 
     const periodMatches = selectedPeriod === 'All' ? true : (() => {
@@ -186,9 +229,11 @@ const Teachers = () => {
       const failedVal = teacher[`${base}_failed`];
       const percentVal = teacher[`${base}_percent`];
       const categoryVal = teacher[`${base}_category`];
-      return (failedVal !== undefined && failedVal !== null) ||
-             (percentVal !== undefined && percentVal !== null) ||
-             (typeof categoryVal === 'string' && categoryVal.trim() !== '');
+      const hasLocal = (failedVal !== undefined && failedVal !== null) ||
+                       (percentVal !== undefined && percentVal !== null) ||
+                       (typeof categoryVal === 'string' && categoryVal.trim() !== '');
+      const zoneLocal = zoneForTeacherPeriod(teacher, selectedPeriod);
+      return hasLocal || !!zoneLocal;
     })();
     
     return matchesSearch && matchesDepartment && matchesZone && matchesStatus && periodMatches;
@@ -825,7 +870,20 @@ const Teachers = () => {
                     {visibleColumns.p1_performance && (
                       <>
                         <TableCell className="w-44 whitespace-nowrap">
-                          <div className="text-sm">{Number(teacher.p1_failed) || 0}</div>
+                          {(() => {
+                            const enrolled = Number(teacher.enrolled_students) || 0;
+                            const failed = Number(teacher.p1_failed);
+                            const pct = Number(teacher.p1_percent);
+                            let displayFailed = 0;
+                            if (isFinite(failed) && failed > 0) {
+                              displayFailed = failed;
+                            } else if (isFinite(pct) && pct > 0 && enrolled > 0) {
+                              displayFailed = Math.round((pct / 100) * enrolled);
+                            } else if (isFinite(Number(teacher.failure_percentage)) && Number(teacher.failure_percentage) > 0 && enrolled > 0) {
+                              displayFailed = Math.round((Number(teacher.failure_percentage) / 100) * enrolled);
+                            }
+                            return <div className="text-sm">{displayFailed}</div>;
+                          })()}
                         </TableCell>
                         <TableCell className="w-44 whitespace-nowrap">
                           <div className="text-sm text-muted-foreground">
@@ -848,7 +906,20 @@ const Teachers = () => {
                     {visibleColumns.p2_performance && (
                       <>
                         <TableCell className="w-44 whitespace-nowrap">
-                          <div className="text-sm">{Number(teacher.p2_failed) || 0}</div>
+                          {(() => {
+                            const enrolled = Number(teacher.enrolled_students) || 0;
+                            const failed = Number(teacher.p2_failed);
+                            const pct = Number(teacher.p2_percent);
+                            let displayFailed = 0;
+                            if (isFinite(failed) && failed > 0) {
+                              displayFailed = failed;
+                            } else if (isFinite(pct) && pct > 0 && enrolled > 0) {
+                              displayFailed = Math.round((pct / 100) * enrolled);
+                            } else if (isFinite(Number(teacher.failure_percentage)) && Number(teacher.failure_percentage) > 0 && enrolled > 0) {
+                              displayFailed = Math.round((Number(teacher.failure_percentage) / 100) * enrolled);
+                            }
+                            return <div className="text-sm">{displayFailed}</div>;
+                          })()}
                         </TableCell>
                         <TableCell className="w-44 whitespace-nowrap">
                           <div className="text-sm text-muted-foreground">
@@ -871,7 +942,20 @@ const Teachers = () => {
                     {visibleColumns.p3_performance && (
                       <>
                         <TableCell className="w-44 whitespace-nowrap">
-                          <div className="text-sm">{Number(teacher.p3_failed) || 0}</div>
+                          {(() => {
+                            const enrolled = Number(teacher.enrolled_students) || 0;
+                            const failed = Number(teacher.p3_failed);
+                            const pct = Number(teacher.p3_percent);
+                            let displayFailed = 0;
+                            if (isFinite(failed) && failed > 0) {
+                              displayFailed = failed;
+                            } else if (isFinite(pct) && pct > 0 && enrolled > 0) {
+                              displayFailed = Math.round((pct / 100) * enrolled);
+                            } else if (isFinite(Number(teacher.failure_percentage)) && Number(teacher.failure_percentage) > 0 && enrolled > 0) {
+                              displayFailed = Math.round((Number(teacher.failure_percentage) / 100) * enrolled);
+                            }
+                            return <div className="text-sm">{displayFailed}</div>;
+                          })()}
                         </TableCell>
                         <TableCell className="w-44 whitespace-nowrap">
                           <div className="text-sm text-muted-foreground">
@@ -893,7 +977,10 @@ const Teachers = () => {
                     )}
                     {visibleColumns.zone && (
                       <TableCell className="w-28 whitespace-nowrap">
-                        <ZoneBadge zone={teacher.zone} />
+                        {(() => {
+                          const z = zoneForTeacherPeriod(teacher, selectedPeriod);
+                          return <ZoneBadge zone={z || teacher.zone} />;
+                        })()}
                       </TableCell>
                     )}
                     {visibleColumns.actions && (

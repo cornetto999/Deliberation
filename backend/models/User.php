@@ -33,32 +33,46 @@ class UserModel {
 
     public function create(string $username, string $password): int {
         $hash = password_hash($password, PASSWORD_DEFAULT);
-        // Detect column for password storage
-        $col = $this->hasColumn('users', 'password_hash') ? 'password_hash' : 'password';
-        $stmt = $this->pdo->prepare("INSERT INTO users (username, {$col}) VALUES (?, ?)");
-        $stmt->execute([$username, $col === 'password_hash' ? $hash : $password]);
+        // Always use password_hash column (created in bootstrap)
+        $stmt = $this->pdo->prepare("INSERT INTO users (username, password_hash) VALUES (?, ?)");
+        $stmt->execute([$username, $hash]);
         return intval($this->pdo->lastInsertId());
     }
 
     public function setPassword(string $username, string $password): bool {
-        $col = $this->hasColumn('users', 'password_hash') ? 'password_hash' : 'password';
-        $value = ($col === 'password_hash') ? password_hash($password, PASSWORD_DEFAULT) : $password;
-        $stmt = $this->pdo->prepare("UPDATE users SET {$col} = ? WHERE username = ?");
-        return $stmt->execute([$value, $username]);
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+        // Always use password_hash column
+        $stmt = $this->pdo->prepare("UPDATE users SET password_hash = ? WHERE username = ?");
+        return $stmt->execute([$hash, $username]);
     }
 
     public function verify(string $username, string $password): ?array {
         $user = $this->findByUsername($username);
-        if (!$user) { return null; }
-        // Support legacy schemas with `password` column
-        if (isset($user['password_hash'])) {
-            if (!password_verify($password, $user['password_hash'])) { return null; }
-            return $user;
+        if (!$user) { 
+            return null; 
         }
+        
+        // Check password_hash first (primary method)
+        if (isset($user['password_hash']) && !empty($user['password_hash'])) {
+            $verified = password_verify($password, $user['password_hash']);
+            if ($verified) {
+                return $user;
+            }
+            // If verification fails, return null
+            return null;
+        }
+        
+        // Fallback: check legacy password column (plain text comparison)
         if (isset($user['password'])) {
-            if ($user['password'] !== $password) { return null; }
-            return $user;
+            if ($user['password'] === $password) {
+                // If using legacy password, upgrade it to hashed
+                $this->setPassword($username, $password);
+                return $user;
+            }
+            return null;
         }
+        
+        // No password field found
         return null;
     }
 
@@ -71,8 +85,14 @@ class UserModel {
 
     private function ensureDefaultAdmin(): void {
         // Create default admin if not present; credentials in setup docs
-        $existing = $this->findByUsername('admin');
-        if ($existing) { return; }
-        $this->create('admin', 'admin123');
+        try {
+            $existing = $this->findByUsername('admin');
+            if ($existing) { return; }
+            $this->create('admin', 'admin123');
+        } catch (Throwable $e) {
+            // Log error but don't fail - allow system to continue
+            // This ensures login still works even if admin creation fails
+            error_log('Failed to ensure default admin: ' . $e->getMessage());
+        }
     }
 }

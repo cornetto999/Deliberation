@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import ZoneBadge from "@/components/ZoneBadge";
 
 const TeacherReports = () => {
   const [teachers, setTeachers] = useState([]);
@@ -41,29 +42,35 @@ const TeacherReports = () => {
   const [zoneModalOpen, setZoneModalOpen] = useState(false);
   const [zoneModalZone, setZoneModalZone] = useState(null);
 
+  // Top-level zone helpers (shared across hooks)
+  const zoneFromPercent = (pct) => {
+    if (!isFinite(pct)) return null;
+    if (pct <= 10) return 'green';
+    if (pct <= 40) return 'yellow';
+    return 'red';
+  };
+
+  const zoneFromCategoryLabel = (cat) => {
+    const u = String(cat || "").toUpperCase().trim();
+    if (u === '') return null;
+    if (u.startsWith('RED')) return 'red';
+    if (u.startsWith('YELLOW')) return 'yellow';
+    if (u.startsWith('GREEN')) return 'green';
+    return null;
+  };
+
+  // Label truncation to minimize length (not width)
+  const truncateLabel = (str, max = 12) => {
+    const s = String(str || "");
+    return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+  };
+
   // Compute teachers for selected zone and period - matches backend logic exactly
   const zoneTeachers = useMemo(() => {
     if (!zoneModalZone) return [];
     const targetZone = zoneModalZone;
 
-    // Helper: zone from percentage using 10/40 thresholds (matches backend)
-    const zoneFromPercent = (pct) => {
-      if (!isFinite(pct)) return null;
-      if (pct <= 0) return 'green';
-      if (pct <= 10) return 'green';
-      if (pct <= 40) return 'yellow';
-      return 'red';
-    };
-
-    // Helper: zone from category label (matches backend)
-    const zoneFromCategoryLabel = (cat) => {
-      const u = String(cat || "").toUpperCase().trim();
-      if (u === '') return null;
-      if (u.startsWith('RED')) return 'red';
-      if (u.startsWith('YELLOW')) return 'yellow';
-      if (u.startsWith('GREEN')) return 'green';
-      return null;
-    };
+    // Use top-level helpers for zone mapping
 
     // Helper: determine zone for a teacher in a given period (matches backend zoneForTeacherPeriod)
     const zoneForTeacherPeriod = (t, pk) => {
@@ -82,20 +89,39 @@ const TeacherReports = () => {
       const enrolled = (typeof enrolledRaw === 'number' || (typeof enrolledRaw === 'string' && enrolledRaw !== '')) 
         ? Number(enrolledRaw) : null;
 
-      // First try: calculate from failed/enrolled
+      // Prioritize stored period-specific percentage (most accurate for period data)
+      if (dbPercent !== null && isFinite(dbPercent)) {
+        return zoneFromPercent(dbPercent);
+      }
+      
+      // Fallback: calculate from period-specific failed/enrolled if both are available
       if (failed !== null && isFinite(failed) && enrolled !== null && isFinite(enrolled) && enrolled > 0) {
         const pct = (failed / enrolled) * 100.0;
         return zoneFromPercent(pct);
       }
       
-      // Second try: use dbPercent
-      if (dbPercent !== null && isFinite(dbPercent)) {
-        return zoneFromPercent(dbPercent);
+      // Fallback: use overall failure_percentage if period-specific data is missing
+      const overallPercentRaw = t.failure_percentage;
+      const overallPercent = (typeof overallPercentRaw === 'number' || (typeof overallPercentRaw === 'string' && overallPercentRaw !== '')) 
+        ? Number(overallPercentRaw) : null;
+      if (overallPercent !== null && isFinite(overallPercent)) {
+        return zoneFromPercent(overallPercent);
       }
       
-      // Third try: use category label
+      // Last resort: use category label
       const cat = t[categoryKey] || '';
-      return zoneFromCategoryLabel(cat);
+      const zoneFromCat = zoneFromCategoryLabel(cat);
+      if (zoneFromCat !== null) {
+        return zoneFromCat;
+      }
+      
+      // Final fallback: use overall zone if available
+      const overallZone = t.zone;
+      if (overallZone === 'green' || overallZone === 'yellow' || overallZone === 'red') {
+        return overallZone;
+      }
+      
+      return null;
     };
 
     return (teachers || []).filter((t) => {
@@ -107,7 +133,15 @@ const TeacherReports = () => {
           if (z) zones.push(z);
         });
         
-        // Worst-case zone: red > yellow > green (exactly matches backend line 147-149)
+        // If no period-specific zones found, try overall zone as fallback
+        if (zones.length === 0) {
+          const overallZone = t.zone;
+          if (overallZone === 'green' || overallZone === 'yellow' || overallZone === 'red') {
+            zones.push(overallZone);
+          }
+        }
+        
+        // Worst-case zone: red > yellow > green (exactly matches backend logic)
         const worstZone = zones.includes('red') ? 'red' 
           : zones.includes('yellow') ? 'yellow' 
           : zones.includes('green') ? 'green' 
@@ -320,6 +354,93 @@ const TeacherReports = () => {
   const COLOR_GREEN = "#22c55e"; // green-500
   const COLOR_YELLOW = "#facc15"; // yellow-400
   const COLOR_RED = "#ef4444"; // red-500
+
+  // Normalize department chart data to percentages to avoid overlap and show clearer ratios
+  const deptChartNormalized = useMemo(() => {
+    return (deptChart || []).map((row) => {
+      const g = Number(row.green) || 0;
+      const y = Number(row.yellow) || 0;
+      const r = Number(row.red) || 0;
+      const total = g + y + r;
+      if (!isFinite(total) || total <= 0) {
+        return { department: row.department || '—', green: 0, yellow: 0, red: 0 };
+      }
+      return {
+        department: row.department || '—',
+        green: (g / total) * 100,
+        yellow: (y / total) * 100,
+        red: (r / total) * 100,
+      };
+    });
+  }, [deptChart]);
+
+  // Overall zone percentages across all departments
+  const deptZoneTotals = useMemo(() => {
+    const totals = (deptChart || []).reduce(
+      (acc, row) => {
+        acc.g += Number(row.green) || 0;
+        acc.y += Number(row.yellow) || 0;
+        acc.r += Number(row.red) || 0;
+        return acc;
+      },
+      { g: 0, y: 0, r: 0 }
+    );
+    const sum = totals.g + totals.y + totals.r;
+    return {
+      gPct: sum > 0 ? (totals.g / sum) * 100 : 0,
+      yPct: sum > 0 ? (totals.y / sum) * 100 : 0,
+      rPct: sum > 0 ? (totals.r / sum) * 100 : 0,
+    };
+  }, [deptChart]);
+
+  // Build per-period teacher lists with computed percent and zone
+  const teachersByPeriod = useMemo(() => {
+    const build = (pk) => {
+      return (teachers || []).map((t) => {
+        const enrolled = Number(t.enrolled_students) || 0;
+        const pct = percentFromData(t[`${pk}_percent`], t[`${pk}_failed`], enrolled);
+        const zone = (() => {
+          if (pct !== null && pct !== undefined) return zoneFromPercent(pct);
+          const zc = zoneFromCategoryLabel(t[`${pk}_category`]);
+          if (zc) return zc;
+          return null;
+        })();
+        return {
+          id: t.id,
+          name: `${t.first_name} ${t.last_name}`,
+          department: t.department || '—',
+          percent: pct,
+          zone,
+        };
+      });
+    };
+    return {
+      P1: build('p1'),
+      P2: build('p2'),
+      P3: build('p3'),
+    };
+  }, [teachers]);
+
+  // Zone filters for each period card
+  const [periodZoneFilters, setPeriodZoneFilters] = useState({ P1: 'All', P2: 'All', P3: 'All' });
+  const setPeriodZoneFilter = (period, value) => {
+    setPeriodZoneFilters((prev) => ({ ...prev, [period]: value }));
+  };
+
+  // Limit per-period list to 5 by default with See more/less toggle
+  const [periodListLimits, setPeriodListLimits] = useState({ P1: 5, P2: 5, P3: 5 });
+  const togglePeriodListLimit = (p) => {
+    setPeriodListLimits((prev) => ({
+      ...prev,
+      [p]: prev[p] <= 5 ? 20 : 5,
+    }));
+  };
+
+  // Search per period (filter by teacher or department)
+  const [periodSearches, setPeriodSearches] = useState({ P1: '', P2: '', P3: '' });
+  const setPeriodSearch = (p, v) => {
+    setPeriodSearches((prev) => ({ ...prev, [p]: v }));
+  };
 
   const getColorForPercent = (pct) => {
     if (pct === 0) return COLOR_GREEN;
@@ -652,7 +773,7 @@ const TeacherReports = () => {
               </div>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0 p-4">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
               <div className="space-y-2">
                 <Label htmlFor="search">Search Teachers</Label>
@@ -749,21 +870,27 @@ const TeacherReports = () => {
               </Badge>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="h-[400px]">
+          <CardContent className="pt-0 p-4">
+            <div style={{ height: isMobile ? 220 : 280 }}>
               <ChartContainer config={percentChartConfig}>
-                <BarChart data={top10Data} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                <BarChart 
+                  data={top10Data} 
+                  margin={{ top: 10, right: 16, left: 12, bottom: 40 }}
+                  barCategoryGap={isMobile ? '20%' : '30%'}
+                  barGap={4}
+                >
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis 
                     dataKey="teacher" 
                     hide={isMobile} 
                     tick={{ fontSize: 10 }} 
                     interval={0} 
-                    angle={-30} 
-                    dy={20}
+                    angle={-20} 
+                    dy={16}
+                    tickFormatter={(v) => truncateLabel(v, isMobile ? 10 : 12)}
                     className="text-xs"
                   />
-                  <YAxis tickFormatter={(v) => `${v}%`} className="text-xs" />
+                  <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} className="text-xs" />
                   <ChartTooltip 
                     content={<ChartTooltipContent nameKey="percent" formatter={(value) => [`${value.toFixed(2)}%`, "Failure %"]} />} 
                   />
@@ -885,81 +1012,143 @@ const TeacherReports = () => {
           </CardContent>
         </Card>
 
-        {/* Department Chart */}
+        {/* Department Chart (normalized to percentages) */}
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle>Zone Distribution by Department ({filters.period})</CardTitle>
-            <CardDescription>GREEN vs YELLOW vs RED per department</CardDescription>
+            <CardDescription>GREEN vs YELLOW vs RED per department (percentage)</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="h-[400px]">
-              <ChartContainer config={{ green: { label: 'GREEN' }, yellow: { label: 'YELLOW' }, red: { label: 'RED' } }}>
-                <BarChart data={deptChart} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis dataKey="department" className="text-xs" angle={-30} dy={20} />
-                  <YAxis className="text-xs" />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <ChartLegend content={<ChartLegendContent />} />
-                  <Bar dataKey="green" fill="#22c55e" stackId="zones" radius={[8,8,0,0]} />
-                  <Bar dataKey="yellow" fill="#facc15" stackId="zones" radius={[8,8,0,0]} />
-                  <Bar dataKey="red" fill="#ef4444" stackId="zones" radius={[8,8,0,0]} />
-                </BarChart>
-              </ChartContainer>
+            <div className="space-y-3">
+              <div className="flex gap-4 text-xs text-muted-foreground">
+                <span className="flex items-center gap-2">
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: COLOR_GREEN }}></span>
+                  Green: {deptZoneTotals.gPct.toFixed(1)}%
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: COLOR_YELLOW }}></span>
+                  Yellow: {deptZoneTotals.yPct.toFixed(1)}%
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: COLOR_RED }}></span>
+                  Red: {deptZoneTotals.rPct.toFixed(1)}%
+                </span>
+              </div>
+              <div style={{ height: isMobile ? 220 : 280 }}>
+                <ChartContainer config={{ green: { label: 'GREEN' }, yellow: { label: 'YELLOW' }, red: { label: 'RED' } }}>
+                  <BarChart 
+                    data={deptChartNormalized} 
+                    margin={{ top: 12, right: 24, left: 12, bottom: 40 }}
+                    barCategoryGap={'40%'}
+                    barGap={2}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis 
+                      dataKey="department" 
+                      className="text-xs" 
+                      interval={0} 
+                      angle={-20} 
+                      dy={14}
+                      tick={{ fontSize: 10 }}
+                      tickFormatter={(v) => truncateLabel(v, isMobile ? 10 : 14)}
+                    />
+                    <YAxis className="text-xs" tick={{ fontSize: 10 }} tickFormatter={(v) => `${v.toFixed(0)}%`} domain={[0, 100]} />
+                    <ChartTooltip content={<ChartTooltipContent formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Percent']} />} />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    <Bar dataKey="green" fill={COLOR_GREEN} stackId="zones" radius={[0,0,0,0]} />
+                    <Bar dataKey="yellow" fill={COLOR_YELLOW} stackId="zones" radius={[0,0,0,0]} />
+                    <Bar dataKey="red" fill={COLOR_RED} stackId="zones" radius={[8,8,0,0]} />
+                  </BarChart>
+                </ChartContainer>
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Charts Grid */}
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card className="shadow-lg">
-            <CardHeader>
-              <CardTitle>Category Distribution ({filters.period})</CardTitle>
-              <CardDescription>GREEN vs YELLOW vs RED across teachers</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[350px] flex items-center justify-center">
-                <ChartContainer config={categoryChartConfig}>
-                  <PieChart>
-                    <Pie 
-                      data={categoryDistribution} 
-                      dataKey="value" 
-                      nameKey="name" 
-                      outerRadius={isMobile ? 80 : 120} 
-                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                    >
-                      {categoryDistribution.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={categoryChartColors[entry.name]} />
-                      ))}
-                    </Pie>
-                    <ChartLegend content={<ChartLegendContent />} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                  </PieChart>
-                </ChartContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-lg">
-            <CardHeader>
-              <CardTitle>Total Enrolled vs Failed ({filters.period})</CardTitle>
-              <CardDescription>Enrolled vs Failed totals comparison</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[350px]">
-                <ChartContainer config={totalsChartConfig}>
-                  <BarChart data={totalsData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="label" className="text-xs" />
-                    <YAxis className="text-xs" />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <ChartLegend content={<ChartLegendContent />} />
-                    <Bar dataKey="enrolled" fill="var(--color-enrolled)" radius={[8, 8, 0, 0]} />
-                    <Bar dataKey="failed" fill="var(--color-failed)" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ChartContainer>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Period Cards with teacher lists and zone filters */}
+        <div className="grid gap-6 md:grid-cols-3">
+          {(['P1','P2','P3']).map((period) => {
+            const data = teachersByPeriod[period] || [];
+            const zoneFilter = periodZoneFilters[period];
+            const search = (periodSearches[period] || '').trim().toLowerCase();
+            const filtered = data.filter((d) => {
+              const matchesZone = zoneFilter === 'All' || d.zone === zoneFilter;
+              const hay = `${d.name} ${d.department}`.toLowerCase();
+              const matchesSearch = search === '' || hay.includes(search);
+              return matchesZone && matchesSearch;
+            });
+            return (
+              <Card key={period} className="shadow-lg">
+                <CardHeader>
+                  <CardTitle>Period {period.slice(1)}</CardTitle>
+                  <CardDescription>List of teachers; filter by zone</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Label className="text-xs">Zone Filter</Label>
+                    <Select value={zoneFilter} onValueChange={(v) => setPeriodZoneFilter(period, v)}>
+                      <SelectTrigger className="h-8 w-36">
+                        <SelectValue placeholder="All" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="All">All Zones</SelectItem>
+                        <SelectItem value="green">Green</SelectItem>
+                        <SelectItem value="yellow">Yellow</SelectItem>
+                        <SelectItem value="red">Red</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={periodSearches[period]}
+                      onChange={(e) => setPeriodSearch(period, e.target.value)}
+                      placeholder="Search"
+                      className="h-8 w-40 text-xs"
+                    />
+                  </div>
+                  <div className="rounded-lg border overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-xs">Teacher</TableHead>
+                          <TableHead className="text-xs">Department</TableHead>
+                          <TableHead className="text-xs">Failure %</TableHead>
+                          <TableHead className="text-xs">Zone</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filtered.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={4} className="text-center text-muted-foreground py-8 text-sm">
+                              No teachers for selected zone
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {filtered.slice(0, periodListLimits[period]).map((d, i) => (
+                          <TableRow key={`${period}-${i}`} className="hover:bg-muted/50">
+                            <TableCell className="font-medium">{d.name}</TableCell>
+                            <TableCell>{d.department}</TableCell>
+                            <TableCell>{d.percent !== null && d.percent !== undefined ? `${d.percent.toFixed(2)}%` : '—'}</TableCell>
+                            <TableCell><ZoneBadge zone={d.zone} /></TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {filtered.length > 5 && (
+                    <div className="flex justify-end mt-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => togglePeriodListLimit(period)}
+                        className="text-xs"
+                      >
+                        {periodListLimits[period] > 5 ? 'See less' : 'See more'}
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       </main>
 

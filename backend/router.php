@@ -26,6 +26,28 @@ if ($uri !== '/' && file_exists($file) && !is_dir($file)) {
     return false; // Let PHP serve the file
 }
 
+// Handle /deliberation/routes/* requests (for web server setups)
+if (preg_match('#^/deliberation/routes/([^/]+)(?:\?.*)?$#', $uri, $matches)) {
+    $route = $matches[1];
+    $routeFile = $backendDir . '/routes/' . $route;
+    
+    if (file_exists($routeFile)) {
+        require $routeFile;
+        return true;
+    }
+}
+
+// Handle /deliberation/* requests (for index.php, etc.)
+if (preg_match('#^/deliberation/(.*)$#', $uri, $matches)) {
+    $path = $matches[1] ?: 'index.php';
+    $file = $backendDir . '/' . $path;
+    
+    if (file_exists($file) && !is_dir($file)) {
+        require $file;
+        return true;
+    }
+}
+
 // Handle /backend/routes/* requests
 if (preg_match('#^/backend/routes/([^/]+)(?:\?.*)?$#', $uri, $matches)) {
     $route = $matches[1];

@@ -29,7 +29,7 @@ const ChartContainer = React.forwardRef(
         data-chart={chartId}
         ref={ref}
         className={cn(
-          "flex aspect-video justify-center text-xs [&_.recharts-cartesian-axis-tick_text]-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]-border/50 [&_.recharts-curve.recharts-tooltip-cursor]-border [&_.recharts-dot[stroke='#fff']]-transparent [&_.recharts-layer]-none [&_.recharts-polar-grid_[stroke='#ccc']]-border [&_.recharts-radial-bar-background-sector]-muted [&_.recharts-rectangle.recharts-tooltip-cursor]-muted [&_.recharts-reference-line_[stroke='#ccc']]-border [&_.recharts-sector[stroke='#fff']]-transparent [&_.recharts-sector]-none [&_.recharts-surface]-none",
+          "flex w-full h-full justify-center text-xs [&_.recharts-cartesian-axis-tick_text]-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]-border/50 [&_.recharts-curve.recharts-tooltip-cursor]-border [&_.recharts-dot[stroke='#fff']]-transparent [&_.recharts-layer]-none [&_.recharts-polar-grid_[stroke='#ccc']]-border [&_.recharts-radial-bar-background-sector]-muted [&_.recharts-rectangle.recharts-tooltip-cursor]-muted [&_.recharts-reference-line_[stroke='#ccc']]-border [&_.recharts-sector[stroke='#fff']]-transparent [&_.recharts-sector]-none [&_.recharts-surface]-none",
           className,
         )}
         {...props}

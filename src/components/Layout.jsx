@@ -72,9 +72,9 @@ const Layout = ({ children }) => {
         <aside className={`
           fixed inset-y-0 left-0 z-40 w-64 bg-card border-r transform transition-transform duration-200 ease-in-out mt-16
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-          md:relative md:translate-x-0 md:mt-0
+          md:fixed md:inset-y-0 md:left-0 md:top-16 md:bottom-0 md:mt-0 md:translate-x-0 md:h-[calc(100vh-4rem)]
         `}>
-          <nav className="flex flex-col gap-2 p-4">
+          <nav className="flex flex-col gap-2 p-4 h-full">
             {navigation.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.href;
@@ -96,7 +96,7 @@ const Layout = ({ children }) => {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 md:ml-0 w-full max-w-full">
+        <main className="flex-1 md:ml-64 w-full max-w-full">
           <div className="container mx-auto px-4 py-6 w-full">
             {children}
           </div>

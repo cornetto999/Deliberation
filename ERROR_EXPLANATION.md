@@ -10,7 +10,7 @@ Your React frontend is trying to connect to a backend API server, but the connec
 - **Root Cause**: No server is listening on port 8000
 
 ### Current Configuration:
-- Your `.env` file is set to: `VITE_API_BASE_URL=http://localhost:8000/backend`
+- Your `.env` file is set to: `REACT_APP_API_BASE_URL=http://localhost:8000/backend`
 - This means the frontend expects a PHP backend server running on port 8000
 
 ## Solutions
@@ -39,7 +39,7 @@ If you prefer to use XAMPP (Apache):
 
 2. **Update your `.env` file**:
    ```
-   VITE_API_BASE_URL=http://localhost/deliberation
+REACT_APP_API_BASE_URL=http://localhost/deliberation
    ```
 
 3. **Start XAMPP**:
@@ -63,4 +63,5 @@ You should see API documentation or a response from the backend.
 ## Quick Fix Script
 
 I've created a helper script `start-backend.sh` that you can run to start the PHP server automatically.
+
 

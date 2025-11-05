@@ -44,9 +44,7 @@ This project includes a React frontend and PHP backend for a school deliberation
 3. **Access Application**
    - Open your browser and go to: `http://localhost:8080`
    - You'll be redirected to the login page
-   - Use the admin credentials to log in
-
-## Project Structure
+   - Use the admin credentials to log in## Project Structure
 
 ```
 ds/
@@ -97,7 +95,7 @@ ds/
 Create a `.env` file in the project root (you can copy from `.env.example`) to configure both frontend and backend:
 
 - Frontend (Vite):
-  - `VITE_API_BASE_URL` should point to your backend base URL without a trailing slash.
+- `REACT_APP_API_BASE_URL` should point to your backend base URL without a trailing slash.
     - Example (XAMPP Apache): `http://localhost/deliberation`
     - Example (PHP built-in server): `http://localhost:8000/backend`
 
@@ -112,6 +110,7 @@ The backend automatically loads `.env` at runtime.
 - Frontend runs on `http://localhost:8080`
 - Backend API runs on `http://localhost/deliberation/`
 - Database: MySQL via XAMPP
+
 
 
 

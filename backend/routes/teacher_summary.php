@@ -38,19 +38,43 @@ if ($programIdParam && $programIdParam > 0) {
 }
 
 $teachers = $teacherModel->all();
-// Recompute per-teacher aggregated stats based on filters so period zones use the filtered denominator
+// Recompute per-teacher aggregated stats based on filters, but preserve period-specific fields
+// Period-specific fields (p1_percent, p2_percent, p3_percent, etc.) should come from database
 $teachersEnriched = [];
 foreach ($teachers as $t) {
   $stats = $teacherModel->aggregateStatsForTeacher(intval($t['id']), $school_year, $semester, $programId);
   $enrolled = intval($stats['enrolled_students'] ?? 0);
   $failed = intval($stats['failed_students'] ?? 0);
-  if ($enrolled > 0 || $failed > 0) {
-    $teachersEnriched[] = array_merge($t, $stats);
-  } else {
-    $teachersEnriched[] = $t;
-  }
+  
+  // Only update overall stats, preserve period-specific fields from database
+  $enriched = array_merge($t, [
+    'enrolled_students' => $enrolled,
+    'failed_students' => $failed,
+    'failure_percentage' => $stats['failure_percentage'] ?? $t['failure_percentage'] ?? 0.00,
+  ]);
+  // Preserve period-specific fields from original teacher data
+  // These fields (p1_percent, p2_percent, p3_percent, p1_failed, p2_failed, p3_failed, etc.) 
+  // should remain from the database, not be overwritten by aggregateStatsForTeacher
+  $teachersEnriched[] = $enriched;
 }
-$teachers = $teachersEnriched;
+// Filter teachers: include those with enrolled students matching filters OR those with period-specific data
+// Period-specific data (p1_percent, p2_percent, p3_percent) should be counted even if overall enrolled is 0
+$teachers = array_values(array_filter($teachersEnriched, function($t) {
+  // Include if has enrolled students matching filters
+  if (intval($t['enrolled_students'] ?? 0) > 0) {
+    return true;
+  }
+  // Also include if has any period-specific data (percent, failed, or category)
+  foreach (['p1', 'p2', 'p3'] as $pk) {
+    $hasPercent = isset($t[$pk . '_percent']) && $t[$pk . '_percent'] !== null && $t[$pk . '_percent'] !== '';
+    $hasFailed = isset($t[$pk . '_failed']) && intval($t[$pk . '_failed'] ?? 0) > 0;
+    $hasCategory = isset($t[$pk . '_category']) && trim($t[$pk . '_category'] ?? '') !== '';
+    if ($hasPercent || $hasFailed || $hasCategory) {
+      return true;
+    }
+  }
+  return false;
+}));
 
 $periods = ['P1','P2','P3'];
 $selectedPeriods = ($period === 'All') ? $periods : [$period];
@@ -76,6 +100,10 @@ function zoneFromPercent(float $pct): string {
 
 // Helper: determine zone for a teacher row in a given period key ('p1'|'p2'|'p3')
 function zoneForTeacherPeriod(array $t, string $pk): ?string {
+  // When filters (especially program) are applied, prefer recomputed aggregate stats
+  // so counts reflect the filtered dataset rather than imported period values.
+  // This avoids teachers being counted in zones that do not belong to the selected filters.
+  global $programId; // detect program filter presence
   $percentKey = $pk . '_percent';
   $failedKey = $pk . '_failed';
   $categoryKey = $pk . '_category';
@@ -87,15 +115,50 @@ function zoneForTeacherPeriod(array $t, string $pk): ?string {
   $failed = is_numeric($failedRaw) ? floatval($failedRaw) : null;
   $enrolled = is_numeric($enrolledRaw) ? floatval($enrolledRaw) : null;
 
+  // If program is filtered (programId set) and recomputed stats exist, use them first
+  // This ensures per-period zone aggregation reflects the selected filters.
+  if ($programId !== null) {
+    $overallPercent = isset($t['failure_percentage']) && is_numeric($t['failure_percentage']) 
+      ? floatval($t['failure_percentage']) : null;
+    $hasRecomputed = (($enrolled !== null && $enrolled > 0) || ($failed !== null && $failed > 0));
+    if ($hasRecomputed && $overallPercent !== null && is_finite($overallPercent)) {
+      return zoneFromPercent($overallPercent);
+    }
+    // If recomputed is present but overallPercent not available, compute from failed/enrolled
+    if ($hasRecomputed && $failed !== null && $enrolled !== null && $enrolled > 0) {
+      $pct = ($failed / $enrolled) * 100.0;
+      return zoneFromPercent($pct);
+    }
+    // Fall through to existing logic when recomputed stats are not available
+  }
+
+  // Prioritize stored period-specific percentage (most accurate for period data)
+  if ($dbPercent !== null && is_finite($dbPercent)) {
+    return zoneFromPercent($dbPercent);
+  }
+  // Fallback: calculate from period-specific failed/enrolled if both are available
   if ($failed !== null && $enrolled !== null && $enrolled > 0) {
     $pct = ($failed / $enrolled) * 100.0;
     return zoneFromPercent($pct);
   }
-  if ($dbPercent !== null) {
-    return zoneFromPercent($dbPercent);
+  // Fallback: use overall failure_percentage if period-specific data is missing
+  $overallPercent = isset($t['failure_percentage']) && is_numeric($t['failure_percentage']) 
+    ? floatval($t['failure_percentage']) : null;
+  if ($overallPercent !== null && is_finite($overallPercent)) {
+    return zoneFromPercent($overallPercent);
   }
+  // Last resort: use category label
   $cat = isset($t[$categoryKey]) ? strval($t[$categoryKey]) : '';
-  return zoneFromCategoryLabel($cat);
+  $zoneFromCat = zoneFromCategoryLabel($cat);
+  if ($zoneFromCat !== null) {
+    return $zoneFromCat;
+  }
+  // Final fallback: use overall zone if available
+  $overallZone = isset($t['zone']) ? strval($t['zone']) : null;
+  if (in_array($overallZone, ['green', 'yellow', 'red'], true)) {
+    return $overallZone;
+  }
+  return null;
 }
 
 // Compute zone counts per selected period using period-based fields
@@ -144,6 +207,14 @@ if ($period === 'All') {
       $z = zoneForTeacherPeriod($t, $pk);
       if ($z) $zones[] = $z;
     }
+    // If no period-specific zones found, try overall zone as fallback
+    if (empty($zones)) {
+      $overallZone = isset($t['zone']) ? strval($t['zone']) : null;
+      if (in_array($overallZone, ['green', 'yellow', 'red'], true)) {
+        $zones[] = $overallZone;
+      }
+    }
+    // Count worst-case zone
     if (in_array('red', $zones, true)) { $consistent['red']++; }
     else if (in_array('yellow', $zones, true)) { $consistent['yellow']++; }
     else if (in_array('green', $zones, true)) { $consistent['green']++; }
