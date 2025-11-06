@@ -167,6 +167,13 @@ try {
             
         case 'teachers':
             $teacher = new TeacherModel($pdo);
+            // Replace mode: delete existing teacher records before importing new ones
+            try {
+                $deleted = $pdo->exec('DELETE FROM teachers');
+            } catch (Exception $e) {
+                // If deletion fails, capture error but continue attempting to import
+                $errors[] = "Failed to delete existing teachers: " . $e->getMessage();
+            }
             foreach ($rows as $row) {
                 try {
                     $teacherData = [

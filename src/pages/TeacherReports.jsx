@@ -37,6 +37,8 @@ const TeacherReports = () => {
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [errorSummary, setErrorSummary] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+        // Local period filter for Top 10 chart when global period is "All"
+  const [top10Period, setTop10Period] = useState("All");
 
   // Zone modal state
   const [zoneModalOpen, setZoneModalOpen] = useState(false);
@@ -157,28 +159,35 @@ const TeacherReports = () => {
     });
   }, [teachers, filters.period, zoneModalZone]);
 
-  // Top 10 failure percent based on selected period
+  // Top 10 failure percent based on selected period (uses local filter when global is "All")
   const top10Data = useMemo(() => {
     const toNum = (x) => {
       if (typeof x === 'number') return x;
       const n = parseFloat(x || '0');
       return isNaN(n) ? 0 : n;
     };
+    const selectedForTop10 = (filters.period === 'All') ? top10Period : filters.period;
     const rows = (teachers || []).map(t => {
       const p1 = toNum(t.p1_percent);
       const p2 = toNum(t.p2_percent);
       const p3 = toNum(t.p3_percent);
       let percent = 0;
-      if (filters.period === 'P1') percent = p1;
-      else if (filters.period === 'P2') percent = p2;
-      else if (filters.period === 'P3') percent = p3;
+      if (selectedForTop10 === 'P1') percent = p1;
+      else if (selectedForTop10 === 'P2') percent = p2;
+      else if (selectedForTop10 === 'P3') percent = p3;
       else percent = Math.max(p1, p2, p3);
       return { teacher: `${t.first_name} ${t.last_name}`, percent };
     })
     .filter(r => Number.isFinite(r.percent));
     rows.sort((a,b) => b.percent - a.percent);
     return rows.slice(0, 10);
-  }, [teachers, filters.period]);
+  }, [teachers, filters.period, top10Period]);
+
+  // Helper: detect if all Top 10 values are zero for the selected period
+  const top10AllZero = useMemo(() => {
+    if (!Array.isArray(top10Data) || top10Data.length === 0) return false;
+    return top10Data.every(r => Number(r.percent) === 0);
+  }, [top10Data]);
 
   useEffect(() => {
     const fetchPrograms = async () => {
@@ -421,20 +430,35 @@ const TeacherReports = () => {
     };
   }, [teachers]);
 
+  // Count per-zone teachers per period
+  const periodZoneCounts = useMemo(() => {
+    const countZone = (arr, z) => (arr || []).reduce((acc, d) => acc + (d.zone === z ? 1 : 0), 0);
+    return {
+      P1: {
+        green: countZone(teachersByPeriod.P1, 'green'),
+        yellow: countZone(teachersByPeriod.P1, 'yellow'),
+        red: countZone(teachersByPeriod.P1, 'red'),
+      },
+      P2: {
+        green: countZone(teachersByPeriod.P2, 'green'),
+        yellow: countZone(teachersByPeriod.P2, 'yellow'),
+        red: countZone(teachersByPeriod.P2, 'red'),
+      },
+      P3: {
+        green: countZone(teachersByPeriod.P3, 'green'),
+        yellow: countZone(teachersByPeriod.P3, 'yellow'),
+        red: countZone(teachersByPeriod.P3, 'red'),
+      },
+    };
+  }, [teachersByPeriod]);
+
   // Zone filters for each period card
   const [periodZoneFilters, setPeriodZoneFilters] = useState({ P1: 'All', P2: 'All', P3: 'All' });
   const setPeriodZoneFilter = (period, value) => {
     setPeriodZoneFilters((prev) => ({ ...prev, [period]: value }));
   };
 
-  // Limit per-period list to 5 by default with See more/less toggle
-  const [periodListLimits, setPeriodListLimits] = useState({ P1: 5, P2: 5, P3: 5 });
-  const togglePeriodListLimit = (p) => {
-    setPeriodListLimits((prev) => ({
-      ...prev,
-      [p]: prev[p] <= 5 ? 20 : 5,
-    }));
-  };
+  // Removed See more/less toggle; tables will scroll when needed
 
   // Search per period (filter by teacher or department)
   const [periodSearches, setPeriodSearches] = useState({ P1: '', P2: '', P3: '' });
@@ -863,14 +887,38 @@ const TeacherReports = () => {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
                 <CardTitle>Top 10 Failure Percent by Teacher</CardTitle>
-                <CardDescription>Sorted by highest failure percentage for {filters.period}</CardDescription>
+                <CardDescription>
+                  Sorted by highest failure percentage for {filters.period === 'All' ? top10Period : filters.period}
+                </CardDescription>
               </div>
-              <Badge variant="outline" className="w-fit">
-                {filters.period} Period
-              </Badge>
+              {filters.period !== 'All' ? (
+                <Badge variant="outline" className="w-fit">
+                  {filters.period} Period
+                </Badge>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs">Period</Label>
+                  <Select value={top10Period} onValueChange={(v) => setTop10Period(v)}>
+                    <SelectTrigger className="h-8 w-28">
+                      <SelectValue placeholder="Period" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="All">All</SelectItem>
+                      <SelectItem value="P1">P1</SelectItem>
+                      <SelectItem value="P2">P2</SelectItem>
+                      <SelectItem value="P3">P3</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           </CardHeader>
           <CardContent className="pt-0 p-4">
+            {top10AllZero && (
+              <div className="mb-2 text-xs text-muted-foreground">
+                No data uploaded for {filters.period === 'All' ? top10Period : filters.period}; showing 0%.
+              </div>
+            )}
             <div style={{ height: isMobile ? 220 : 280 }}>
               <ChartContainer config={percentChartConfig}>
                 <BarChart 
@@ -1015,8 +1063,26 @@ const TeacherReports = () => {
         {/* Department Chart (normalized to percentages) */}
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle>Zone Distribution by Department ({filters.period})</CardTitle>
-            <CardDescription>GREEN vs YELLOW vs RED per department (percentage)</CardDescription>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <CardTitle>Zone Distribution by Department ({filters.period})</CardTitle>
+                <CardDescription>GREEN vs YELLOW vs RED per department (percentage)</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-xs">Period</Label>
+                <Select value={filters.period} onValueChange={(v) => setFilters((f) => ({ ...f, period: v }))}>
+                  <SelectTrigger className="h-8 w-28">
+                    <SelectValue placeholder="Period" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="All">All</SelectItem>
+                    <SelectItem value="P1">P1</SelectItem>
+                    <SelectItem value="P2">P2</SelectItem>
+                    <SelectItem value="P3">P3</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
@@ -1080,8 +1146,53 @@ const TeacherReports = () => {
             return (
               <Card key={period} className="shadow-lg">
                 <CardHeader>
-                  <CardTitle>Period {period.slice(1)}</CardTitle>
-                  <CardDescription>List of teachers; filter by zone</CardDescription>
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <CardTitle>Period {period.slice(1)}</CardTitle>
+                      <CardDescription>
+                        {zoneFilter === 'All'
+                          ? 'Green vs Yellow vs Red per department (counts)'
+                          : `${zoneFilter[0].toUpperCase()}${zoneFilter.slice(1)} zone per department (count)`}
+                      </CardDescription>
+                    </div>
+                    {zoneFilter === 'All' ? (
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className="text-xs text-green-700 border-green-300 bg-green-50 dark:bg-green-950"
+                        >
+                          {periodZoneCounts[period]?.green ?? 0}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className="text-xs text-yellow-700 border-yellow-300 bg-yellow-50 dark:bg-yellow-950"
+                        >
+                          {periodZoneCounts[period]?.yellow ?? 0}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className="text-xs text-red-600 border-red-300 bg-red-50 dark:bg-red-950"
+                        >
+                          {periodZoneCounts[period]?.red ?? 0}
+                        </Badge>
+                      </div>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${zoneFilter === 'green'
+                          ? 'text-green-700 border-green-300 bg-green-50 dark:bg-green-950'
+                          : zoneFilter === 'yellow'
+                          ? 'text-yellow-700 border-yellow-300 bg-yellow-50 dark:bg-yellow-950'
+                          : 'text-red-600 border-red-300 bg-red-50 dark:bg-red-950'}`}
+                      >
+                        {zoneFilter === 'green'
+                          ? (periodZoneCounts[period]?.green ?? 0)
+                          : zoneFilter === 'yellow'
+                          ? (periodZoneCounts[period]?.yellow ?? 0)
+                          : (periodZoneCounts[period]?.red ?? 0)}
+                      </Badge>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center gap-2 mb-3">
@@ -1104,15 +1215,16 @@ const TeacherReports = () => {
                       className="h-8 w-40 text-xs"
                     />
                   </div>
-                  <div className="rounded-lg border overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="text-xs">Teacher</TableHead>
-                          <TableHead className="text-xs">Department</TableHead>
-                          <TableHead className="text-xs">Failure %</TableHead>
-                          <TableHead className="text-xs">Zone</TableHead>
-                        </TableRow>
+                  <div className="rounded-lg border">
+                    <div className={filtered.length > 5 ? 'max-h-64 overflow-y-auto' : ''}>
+                      <Table>
+                      <TableHeader className={filtered.length > 5 ? 'sticky top-0 bg-background' : ''}>
+                         <TableRow>
+                           <TableHead className="text-xs">Teacher</TableHead>
+                           <TableHead className="text-xs">Department</TableHead>
+                           <TableHead className="text-xs">Failure %</TableHead>
+                           <TableHead className="text-xs">Zone</TableHead>
+                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {filtered.length === 0 && (
@@ -1122,7 +1234,7 @@ const TeacherReports = () => {
                             </TableCell>
                           </TableRow>
                         )}
-                        {filtered.slice(0, periodListLimits[period]).map((d, i) => (
+                        {filtered.map((d, i) => (
                           <TableRow key={`${period}-${i}`} className="hover:bg-muted/50">
                             <TableCell className="font-medium">{d.name}</TableCell>
                             <TableCell>{d.department}</TableCell>
@@ -1131,20 +1243,10 @@ const TeacherReports = () => {
                           </TableRow>
                         ))}
                       </TableBody>
-                    </Table>
-                  </div>
-                  {filtered.length > 5 && (
-                    <div className="flex justify-end mt-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => togglePeriodListLimit(period)}
-                        className="text-xs"
-                      >
-                        {periodListLimits[period] > 5 ? 'See less' : 'See more'}
-                      </Button>
+                      </Table>
                     </div>
-                  )}
+                  </div>
+                  {/* See more/less removed per request; scroll container shows all rows */}
                 </CardContent>
               </Card>
             );

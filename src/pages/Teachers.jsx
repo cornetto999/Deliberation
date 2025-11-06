@@ -179,6 +179,41 @@ const Teachers = () => {
     return z || t.zone || null;
   };
 
+  // Export list of teachers with their zone color as CSV
+  const exportTeachersZoneCSV = () => {
+    try {
+      const header = ['FacultyNo', 'TeacherName', 'Department', 'ZoneColor'];
+      const rows = (teachers || []).map((t) => {
+        const zoneLocal = zoneForTeacherPeriod(t, selectedPeriod);
+        const zone = (zoneLocal || t.zone || '').toUpperCase();
+        const name = `${t.first_name || ''} ${t.last_name || ''}`.trim();
+        return [t.teacher_id || '', name || '', t.department || '', zone || ''];
+      });
+
+      const escapeField = (val) => {
+        const s = String(val ?? '');
+        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+          return '"' + s.replace(/"/g, '""') + '"';
+        }
+        return s;
+      };
+
+      const csv = [header.join(','), ...rows.map(r => r.map(escapeField).join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const periodLabel = selectedPeriod === 'All' ? 'All' : selectedPeriod;
+      a.href = url;
+      a.download = `teachers_zone_colors_${semester}_semester_${periodLabel}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (e) {
+      console.error('Failed to export teachers zone CSV:', e);
+    }
+  };
+
   const fetchTeachers = async () => {
     try {
       setLoading(true);
@@ -694,15 +729,27 @@ const Teachers = () => {
                 Find teachers by name or ID
               </CardDescription>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowFilters(!showFilters)}
-              className="hover:bg-accent"
-            >
-              <Filter className="h-4 w-4 mr-2" />
-              {showFilters ? 'Hide' : 'Show'} Filters
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportTeachersZoneCSV}
+                className="hover:bg-accent"
+                aria-label="Export teachers with zone colors as CSV"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowFilters(!showFilters)}
+                className="hover:bg-accent"
+              >
+                <Filter className="h-4 w-4 mr-2" />
+                {showFilters ? 'Hide' : 'Show'} Filters
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
